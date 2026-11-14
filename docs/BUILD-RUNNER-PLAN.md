@@ -11,7 +11,7 @@
 | 服务商与计费 | **Vultr 按小时租用**；实际机型、可用磁盘、费用以用户及监督者创建时的订单与实例信息为准，不预设价格 |
 | 生命周期 | 为本轮固定基线短期创建，跑完并保存构建证据后**删机**，由用户及监督者确认实际资源已释放 |
 | 运行方式 | GitHub 仓库级 **self-hosted Runner**，正常 Linux/x64 标签匹配；不使用 GitHub 或 CircleCI 付费托管 Runner |
-| 当前进度 | 用户正在进行 Vultr 账号注册及**支付宝充值**；随后由监督者负责创建服务器、注册 Runner 和实施构建 |
+| 当前进度（2026-11-14 23:46 CST） | 用户已于 **23:02** 完成充值、**23:27** 建立 Vultr 新加坡服务器（8 核 / 32 GB / 640 GB），**23:29** 注册并上线 `titanium-builder-1`。首次基线 [Run #43610465444](https://github.com/Zhanfg/android-titanium-browser/actions/runs/43610465444) 已失败（`git am` 缺 committer 身份，exit 128），源码 checkout 成功但 GN/编译未启动；修复见 [Draft PR #7](https://github.com/Zhanfg/android-titanium-browser/pull/7)，待监督者审核合入后重派 |
 | 权限边界 | 用户与监督者独占账号/付款、虚拟机、Runner 注册/注销、GitHub Build 启用与触发、产物收集及删机操作。实施凭据、注册令牌、API Token、签名密钥均**不进入本会话** |
 | 验收状态 | **G0 未过**，尚未取得新服务器的环境实测、基线构建日志和 APK/AAB；G1 PR #2 继续「已写未验（待基线构建）」 |
 
