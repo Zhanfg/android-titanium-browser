@@ -2,32 +2,36 @@
 
 > 2026-11-14 计划稿。只供方案比较，不作 Runner 选型，不实施或修改构建代码。以下推荐量级与工时均为粗估，不代表任何一次实测。
 
-## Decision record：2026-11-14 20:43 CST Hetzner CCX33 定版
+## Decision record：2026-11-14 22:57 CST Vultr self-hosted Runner 定版（最新有效）
 
-**用户与监督者最新决策（取代本文较早的待选讨论）：G0 基线构建机采用临时按小时租用的 Hetzner Cloud CCX33，注册为 fork 仓库的 GitHub Actions self-hosted Runner，跑固定基线源码，完成后销毁服务器。** 当前是执行落点的决策，不是设备已上线或基线构建已完成的证明。
+**用户于 2026-11-14 22:57 CST 最终决定：G0 基线构建机采用 Vultr 按小时租用的临时云服务器，注册为本 fork `Zhanfg/android-titanium-browser` 的 GitHub Actions self-hosted Runner，完成基线构建且确认保存日志与 APK/AAB 产物后删除服务器。** Vultr 为本轮唯一执行落点，不再属于供应商待选方案。具体实例型号、区域、小时费率和磁盘容量未在本次授权消息中给出，不能引用先前 Hetzner CCX33 的配置或价格冒充 Vultr 规格。
 
-| 字段 | 已定规格与责任边界 |
+| 项目 | 最终决定 / 实施边界 |
 |---|---|
-| 型号 | Hetzner Cloud **CCX33**，**8 核独占 vCPU / 32 GB RAM / 240 GB NVMe** |
-| 区域 | 德国 Falkenstein（FSN）或芬兰 Helsinki（HEL），由监督者最终选择 |
-| 操作系统 | **Ubuntu 24.04** |
-| 德国/芬兰价格 | **€0.2219/小时**，**不含 VAT**；以正式开通页面计费明细为准，可选 IPv4 等可能另计费 |
-| 计费与生命周期 | 按使用小时计费，完成本次作业并确认证据/产物留存后**删除云服务器**；实际费用按供应商小时计费、每月封顶规则计算 |
-| GitHub 角色 | 在 `Zhanfg/android-titanium-browser` 仓库注册的 **self-hosted GitHub Actions Runner** |
-| 实施分工 | **仅用户和监督者**办理 Hetzner 账号、付款、开机、注册/注销 Runner、启用/派发 Build、后续销毁及资源清理；本计划作者仅修改文档并提供只读审计，不操作基础设施，不处理或索取任何注册令牌/密钥 |
+| 服务商与计费 | **Vultr 按小时租用**；实际机型、可用磁盘、费用以用户及监督者创建时的订单与实例信息为准，不预设价格 |
+| 生命周期 | 为本轮固定基线短期创建，跑完并保存构建证据后**删机**，由用户及监督者确认实际资源已释放 |
+| 运行方式 | GitHub 仓库级 **self-hosted Runner**，正常 Linux/x64 标签匹配；不使用 GitHub 或 CircleCI 付费托管 Runner |
+| 当前进度 | 用户正在进行 Vultr 账号注册及**支付宝充值**；随后由监督者负责创建服务器、注册 Runner 和实施构建 |
+| 权限边界 | 用户与监督者独占账号/付款、虚拟机、Runner 注册/注销、GitHub Build 启用与触发、产物收集及删机操作。实施凭据、注册令牌、API Token、签名密钥均**不进入本会话** |
+| 验收状态 | **G0 未过**，尚未取得新服务器的环境实测、基线构建日志和 APK/AAB；G1 PR #2 继续「已写未验（待基线构建）」 |
 
-**官方价格及规格核对：** [Hetzner 2026-06-15 调价表](https://docs.hetzner.com/general/infrastructure-and-availability/price-adjustment/) 列出的德国/芬兰 CCX33 净价为 €0.2219/h；[Hetzner Cloud CCX 产品表](https://www.hetzner.com/cloud/general-purpose/) 为 8 vCPU / 32 GB / 240 GB NVMe。官网当前页面可能出现库存/可用性限制，最终以用户和监督者实际可创建的地区为准；此文档不发起采购。
+### 出局与停用链（全部记录于 2026-11-14）
 
-**路线收束与实测依据：**
+- **GitHub 标准托管 Runner（2026-11-14）**：探针 [Run #43584460871](https://github.com/Zhanfg/android-titanium-browser/actions/runs/43584460871) 拉取前可用 **87.069 GiB**、取源后 **47.440 GiB**，起始磁盘不足 Chromium 官方约 100 GB 的构建规划要求，**出局**。
+- **CircleCI 免费档（2026-11-14）**：Machine large 探针 [Pipeline #6](https://circleci.com/api/v2/pipeline/97d5265c-0137-422d-9057-41569d85ee5d) 取源成功后余约 **95 GiB**（精确 **101591863296 字节**），且单 Job 最长 **60 分钟**，完整构建未验证、耗时与空间存在结构性限制，**出局**。注意 95 GiB 与 100 GB 的单位差异，不将取源成功误写为编译成功。
+- **Hetzner（2026-11-14；20:43 CST 曾选 CCX33，22:57 CST 撤销）**：用户注册卡在身份验证，**出局**；此前 CCX33 规格、净价和部署计划均为历史废止方案。
+- **GCP（2026-11-14）**：用户无试用资格，且 Google 风控不接受用户银行卡，开通失败，**出局**。
+- **付费 CI（2026-11-14）**：GitHub Larger runners、CircleCI Performance，**本轮关闭**。
+- **其他路线（2026-11-14）**：家用大主机、Oracle 及其他未授权执行落点，**本轮不启用**。
 
-- **GitHub 标准托管 Runner：出局。** [Run #43584460871](https://github.com/Zhanfg/android-titanium-browser/actions/runs/43584460871) 拉取前只有 **87.069 GiB** 可用，拉取后 **47.440 GiB**，初始已低于 Chromium 官方约 100 GB 的源码构建规划下限。
-- **CircleCI 免费档 machine large：本轮不作为完整基线构建机。** [Pipeline #6](https://circleci.com/api/v2/pipeline/97d5265c-0137-422d-9057-41569d85ee5d) 成功拉取源码，但拉取后仅显示约 **95 GiB** 空闲（精确值 101591863296 字节，约 101.592 GB 十进制）；同时免费计划单 Job 上限 **60 分钟**，与数小时级全量编译规划存在时间结构冲突，**不是实测编译超时**。
-- **本轮关闭/不启用：** CircleCI Performance、GitHub Larger runners 等付费 CI 路线；家用大主机、Oracle、GCP；其他临时租机选项不自动恢复。按用户的新决策，仅 Hetzner CCX33 自托管 Runner 路线进入实施准备。
-- **新的真实验收门：** 用户/监督者完成开通及 runner 注册后，再经明确指令派发固定源码的基线构建，复核完整日志、资源消耗和 APK/AAB Artifact；在此之前 G0 **未过**、G1 PR #2 **已写未验（待基线构建）**；G2/G3 不动。
+### 启用前的核查范围
 
-**安全边界：** 不触碰 `main`，不合并任何 PR；不启用或派发原 `.github/workflows/build.yml`，不制作/索取 Hetzner API key、Runner 注册令牌或任何凭据。原 Build 工作流含自动更新/推送 Vanadium、Release 发布和签名步骤，必须先经只读核查并确认固定基线的安全路径，详见单独的衔接审查记录或 Draft PR。
+- 监督者上线 Vultr 服务器和 Runner 后，以只读方式确认运行环境、标签、磁盘实测与构建适用性；由监督者独立完成付款和凭据保管。
+- 现有 `.github/workflows/build.yml` 手动输入默认可选 `self-hosted`，但还含定时触发、Vanadium 自动更新并可能推送、Release 发布及 Attestation；它**不能原样作为固定基线的无发布验证流程**。
+- [Draft PR #6](https://github.com/Zhanfg/android-titanium-browser/pull/6) 仅提供不发布版本的手动基线工作流提案及详细启用清单。**未授权合并、启用或触发任何 Build 工作流。**
+- 等待监督者明确通知 Runner 已上线并给出后续执行指令；在此之前不再选型、探针、构建或改 G1/G2/G3。
 
-## Decision record：2026-11-14 CircleCI large 探针最终证据与待决策项
+## 历史证据（2026-11-14）：CircleCI large 探针及当时待决事项（已由 22:57 决策覆盖）
 
 **G0 尚未通过，不能将取源 success 写成可构建 Chromium。** 当前仅证明两个标准/免费托管来源具备拉取 Chromium `157.0.8103.78` 源码的能力，均未尝试 `gclient runhooks`、`gn gen`、`autoninja`、APK/AAB、签名与发布。
 
@@ -48,9 +52,9 @@
 
 **结构性时间限制：** CircleCI Free 计划单个 Job 最长 **60 分钟**；全量 Chromium 双架构构建预计数小时，属于**计划耗时估算与产品时长约束的结构性冲突**，并非一次实际编译超时。不得自行将探针延展为构建。
 
-**下一步由用户决定，当前不选方案：** 是否考虑付费档位、其他执行机器、或拆分 Job/缓存等构建架构，需要另行授权和更详细测算。此前关闭的家用主机及租机方案不会自动恢复。**CircleCI 探针线已结束，停止进一步重跑、降档、换 executor、修改仓库/付款设置。G0 未过，G1 PR #2 保持「已写未验（待基线构建）」，G2/G3 停止在原阶段。**
+**历史状态（22:57 CST Vultr 决策前）：** 是否考虑付费档位、其他执行机器、或拆分 Job/缓存等构建架构，需要另行授权和更详细测算。此前关闭的家用主机及租机方案不会自动恢复。**CircleCI 探针线已结束，停止进一步重跑、降档、换 executor、修改仓库/付款设置。G0 未过，G1 PR #2 保持「已写未验（待基线构建）」，G2/G3 停止在原阶段。**
 
-## Decision record：2026-11-14 用户决定
+## 历史决策记录（2026-11-14）：最初选择 GitHub 托管进行探针，现已被 Vultr 决策取代
 
 **2026-11-14 早期决策记录：先选择 GitHub 托管 Runner 进行取证（标准档现已在后续探针中排除）。** 家用高配主机自托管和临时租高配云机两条路线关闭，不再准备。下文第三节原有三种落点对比保留为历史估算，不再代表待选方案。
 
@@ -65,7 +69,7 @@ GitHub 托管分两档，授权与资源边界不得混淆：
 
 **执行门槛（已完成）：** 标准 Runner 的只读取证结束，监督者已独立复核；后续仅允许独立 CircleCI 探针，不允许在 GitHub 标准 Runner 上启动基线编译。G1 仍为「已写未验（待基线构建）」。不得将探针结果表述为构建或运行验证。
 
-## Decision record：2026-11-14 GitHub 标准托管探针实测结论
+## 历史证据（2026-11-14）：GitHub 标准托管探针实测结论
 
 **用户已决定：GitHub 标准托管 Runner 作为本轮基线构建候选出局；转向 CircleCI 再进行同口径探针。** 此处是标准规格实测排除，不是 GitHub 的 Larger runners 已被实测排除；后者受计划与付费限制，仍不授权启用。家用大主机与临时租云机两条线继续关闭。
 
@@ -86,7 +90,7 @@ GitHub 托管分两档，授权与资源边界不得混淆：
 
 **分层结论：** (1) 源码获取已证可行；(2) 标准托管在开始前即达不到 Chromium 官方 100 GB 空闲硬要求，故不再作为完整基线双架构编译候选；(3) `gclient runhooks`、`gn gen`、`autoninja`、APK/AAB、签名发布从未在探针中执行，不能凭推断声称曾发生编译失败。G0 尚未通过基线构建验收，G1 继续为「已写未验（待基线构建）」。
 
-**本轮授权的后续工作：** 在 CircleCI 免费计划 Linux VM `xlarge` 做单次、有界的 CPU/RAM/磁盘与源码拉取探针，不编译、不超时、不配置付费和 Larger runners，结果由监督者独立读取 CircleCI API 再对账。
+**历史授权（已执行并结案）：** 当时在 CircleCI 免费计划 Linux VM `xlarge` 做单次、有界的 CPU/RAM/磁盘与源码拉取探针，不编译、不超时、不配置付费和 Larger runners，结果由监督者独立读取 CircleCI API 再对账。
 
 ## 1. 依据与现有构建流程
 
@@ -115,7 +119,7 @@ GitHub 托管分两档，授权与资源边界不得混淆：
 
 **口径声明：** 8 GB、100 GB 与 >16 GB 来自官方构建文档；32–64 GB、250–400 GB、16–32 线程、3–12+ 小时及其他区间是工程估算，未经本仓实测。这里的磁盘指构建期间的**空闲空间**，不是磁盘总容量。估时包含显著不确定性，不能作为交付承诺。
 
-## 3. 三种部署落点对比（历史资料，现已选定托管）
+## 3. 曾讨论的部署落点（历史对比，已由 Vultr 决策取代）
 
 | 落点 | 能力与特点 | 风险、成本项与待核对条件 |
 |---|---|---|
@@ -125,14 +129,14 @@ GitHub 托管分两档，授权与资源边界不得混淆：
 
 不因标准 GitHub Runner 空间不足就笼统判断“全部 GitHub 托管方案不可行”；large runner 与自托管/云机仍需独立测算。
 
-## 4. 后续做决策前需要的输入（仅记录，不执行）
+## 4. 历史测算输入清单（不代表当前路线待选）
 
 - 候选家用主机的 CPU 型号、实际 RAM、可用 NVMe 空间、供电/散热、网络；候选云主机的地区、性能和计费方式。
 - 每月预期构建次数、最大允许耗时、是否需要长期缓存与多版本并行。
 - 真实 baseline 的各阶段 `time`、峰值内存、磁盘、网络流量和 APK/AAB 大小，并独立记录双 ABI。
 - 安全隔离方案：PR 构建不使用正式签名密钥、不自动发布 Release、不擅自更新 Vanadium 子模块。
 
-**最新状态（2026-11-14 20:43 CST 决策）：Hetzner Cloud CCX33 按小时租用并作为仓库 self-hosted GitHub Actions Runner 的落点已定，但尚未确认服务器或 Runner 实际上线；GitHub/CircleCI 探针保留为历史证据。G0 未过，G1 PR #2 已写未验（待基线构建），G2/G3 不动。**
+**最新状态（2026-11-14 22:57 CST）：Vultr 按小时租用、仓库级 self-hosted Runner 已定版；用户注册并通过支付宝充值，监督者随后负责建机/Runner。此前 Hetzner 决策废止。G0 未过，G1 PR #2 已写未验（待基线构建），G2/G3 不动。**
 
 ## 5. 来源
 
