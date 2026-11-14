@@ -182,4 +182,69 @@ if (content::WebContents::HasLiveWebContentsForBrowserContext(profile)) { return
 sed -i 's/|| mSupportedProfileType == SupportedProfileType.REGULAR) {/|| mSupportedProfileType == SupportedProfileType.REGULAR || mSupportedProfileType == SupportedProfileType.MIXED) {/' chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
 sed -i 's/|| mSupportedProfileType == SupportedProfileType.OFF_THE_RECORD) {/|| mSupportedProfileType == SupportedProfileType.OFF_THE_RECORD || mSupportedProfileType == SupportedProfileType.MIXED) {/' chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
 
+# ext: adaptive-toolbar
+# Fork-local layout changes for Chromium 157. Keep the existing ext: pin block untouched.
+# Fail closed if any source anchor drifts; validate all anchors before editing.
+adaptive_toolbar_require_anchor() {
+    local file="$1" needle="$2" expected="$3" count
+    count=$(grep -F -c -- "$needle" "$file" || true)
+    if [ "$count" -ne "$expected" ]; then
+        echo "adaptive-toolbar: anchor mismatch $file: expected $expected, got $count: $needle" >&2
+        return 1
+    fi
+}
+adaptive_toolbar_require_anchor chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/top/ToolbarPhone.java 'boolean hideHomeButton = !mIsHomeButtonEnabled || mIsToolbarUiRefactorEnabled;' 1 || return 1
+adaptive_toolbar_require_anchor chrome/android/java/src/org/chromium/chrome/browser/appearance/settings/AppearanceSettingsFragment.java '        initTabPositionPref();' 1 || return 1
+adaptive_toolbar_require_anchor chrome/android/java/src/org/chromium/chrome/browser/tabbed_mode/TabbedAppMenuPropertiesDelegate.java 'HomepageManager.getInstance().shouldShowHomepageMenuItem()' 2 || return 1
+adaptive_toolbar_require_anchor chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/adaptive/OptionalNewTabButtonController.java 'protected boolean shouldShowButton(@Nullable Tab tab) {' 1 || return 1
+adaptive_toolbar_require_anchor chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/top/ToolbarTablet.java 'private static final int MINIMUM_LOCATION_BAR_WIDTH_DP = 200;' 1 || return 1
+adaptive_toolbar_require_anchor chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/top/ToolbarTablet.java 'mToolbarWidthConsumers[ToolbarComponentId.HOME] = homeButtonCoordinator;' 1 || return 1
+adaptive_toolbar_require_anchor chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/top/ToolbarUtils.java '                ToolbarComponentId.TAB_SWITCHER,' 1 || return 1
+adaptive_toolbar_require_anchor chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/top/ToolbarUtils.java '                ToolbarComponentId.EXTENSIONS_REQUEST_ACCESS_BUTTON,' 1 || return 1
+adaptive_toolbar_require_anchor chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsToolbarCoordinatorImpl.java '    private @Nullable Runnable mOnFeatureRemoved;' 1 || return 1
+adaptive_toolbar_require_anchor chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsToolbarCoordinatorImpl.java '        context.registerComponentCallbacks(this);' 1 || return 1
+adaptive_toolbar_require_anchor chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsToolbarCoordinatorImpl.java '        if (mContainer != null && mContainer.getContext() != null) {' 1 || return 1
+adaptive_toolbar_require_anchor chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsToolbarCoordinatorImpl.java '        // Force layout refresh to pick up new dimensions if density changed.' 1 || return 1
+adaptive_toolbar_require_anchor chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsToolbarCoordinatorImpl.java '    private void updateMenuIconVisibility() {' 1 || return 1
+
+# Home defaults to the app menu. A toggle is added to Appearance settings.
+sed -i 's#boolean hideHomeButton = !mIsHomeButtonEnabled || mIsToolbarUiRefactorEnabled;#boolean hideHomeButton = !mIsHomeButtonEnabled || mIsToolbarUiRefactorEnabled || !org.chromium.base.ContextUtils.getAppSharedPreferences().getBoolean("titanium_adaptive_show_home", false);#' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/top/ToolbarPhone.java || return 1
+sed -i '/        initTabPositionPref();/a\        androidx.preference.SwitchPreferenceCompat homePref = new androidx.preference.SwitchPreferenceCompat(requireContext());\
+        homePref.setKey("titanium_adaptive_show_home");\
+        homePref.setTitle("Show Home button in toolbar");\
+        homePref.setSummary("Display the Home shortcut in the top toolbar (restart browser)");\
+        homePref.setPersistent(false);\
+        homePref.setChecked(ContextUtils.getAppSharedPreferences().getBoolean("titanium_adaptive_show_home", false));\
+        homePref.setOnPreferenceChangeListener((pref, value) -> { ContextUtils.getAppSharedPreferences().edit().putBoolean("titanium_adaptive_show_home", (Boolean) value).apply(); return true; });\
+        getPreferenceScreen().addPreference(homePref);' chrome/android/java/src/org/chromium/chrome/browser/appearance/settings/AppearanceSettingsFragment.java || return 1
+sed -i 's|HomepageManager.getInstance().shouldShowHomepageMenuItem()|HomepageManager.getInstance().isHomepageEnabled()|g' chrome/android/java/src/org/chromium/chrome/browser/tabbed_mode/TabbedAppMenuPropertiesDelegate.java || return 1
+
+# New tab remains in the app menu and tab switcher.
+sed -i '/protected boolean shouldShowButton(@Nullable Tab tab) {/a\        if (!org.chromium.base.ContextUtils.getAppSharedPreferences().getBoolean("titanium_adaptive_show_new_tab", false)) return false;' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/adaptive/OptionalNewTabButtonController.java || return 1
+
+# Tablet omnibox width guarantee and home button preference.
+sed -i 's|private static final int MINIMUM_LOCATION_BAR_WIDTH_DP = 200;|private static final int MINIMUM_LOCATION_BAR_WIDTH_DP = 240;|' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/top/ToolbarTablet.java || return 1
+sed -i 's|mToolbarWidthConsumers\[ToolbarComponentId.HOME\] = homeButtonCoordinator;|mToolbarWidthConsumers[ToolbarComponentId.HOME] = org.chromium.base.ContextUtils.getAppSharedPreferences().getBoolean("titanium_adaptive_show_home", false) ? homeButtonCoordinator : null; if (mToolbarWidthConsumers[ToolbarComponentId.HOME] == null) homeButtonCoordinator.setHasSpaceToShow(false);|' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/top/ToolbarTablet.java || return 1
+sed -i '/                ToolbarComponentId.MENU,/{N;N;s|ToolbarComponentId.MENU,\n                ToolbarComponentId.TAB_SWITCHER,\n                ToolbarComponentId.LOCATION_BAR_MINIMUM,|ToolbarComponentId.MENU,\n                ToolbarComponentId.TAB_SWITCHER,\n                ToolbarComponentId.EXTENSIONS_MENU_BUTTON,\n                ToolbarComponentId.LOCATION_BAR_MINIMUM,|;}' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/top/ToolbarUtils.java || return 1
+sed -i '/                ToolbarComponentId.HOME,/{N;N;s|ToolbarComponentId.HOME,\n                ToolbarComponentId.EXTENSIONS_MENU_BUTTON,\n                ToolbarComponentId.EXTENSIONS_REQUEST_ACCESS_BUTTON,|ToolbarComponentId.HOME,\n                ToolbarComponentId.EXTENSIONS_REQUEST_ACCESS_BUTTON,|;}' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/top/ToolbarUtils.java || return 1
+
+# Refit pinned icons to actual available window width; existing pin behavior remains authoritative.
+sed -i '/    private @Nullable Runnable mOnFeatureRemoved;/a\    private ViewGroup mAdaptiveRootView;\
+    private View.OnLayoutChangeListener mAdaptiveWidthListener;' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsToolbarCoordinatorImpl.java || return 1
+sed -i '/        context.registerComponentCallbacks(this);/a\        mAdaptiveRootView = rootView;\
+        mAdaptiveWidthListener = (view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> { if (right - left != oldRight - oldLeft) updateAdaptivePinnedWidth(); };\
+        rootView.addOnLayoutChangeListener(mAdaptiveWidthListener);\
+        rootView.post(this::updateAdaptivePinnedWidth);' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsToolbarCoordinatorImpl.java || return 1
+sed -i '/        if (mContainer != null && mContainer.getContext() != null) {/i\        if (mAdaptiveRootView != null && mAdaptiveWidthListener != null) { mAdaptiveRootView.removeOnLayoutChangeListener(mAdaptiveWidthListener); mAdaptiveRootView = null; mAdaptiveWidthListener = null; }' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsToolbarCoordinatorImpl.java || return 1
+sed -i '/        \/\/ Force layout refresh to pick up new dimensions if density changed./i\        updateAdaptivePinnedWidth();' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsToolbarCoordinatorImpl.java || return 1
+sed -i '/    private void updateMenuIconVisibility() {/i\    private void updateAdaptivePinnedWidth() {\
+        if (mAdaptiveRootView == null || mExtensionActionListCoordinator == null) return;\
+        float density = mContainer.getResources().getDisplayMetrics().density;\
+        int widthPx = mAdaptiveRootView.getWidth();\
+        if (widthPx <= 0) widthPx = (int) (mContainer.getResources().getConfiguration().screenWidthDp * density);\
+        int reservedDp = 240 + 48 * 2 + (isMenuButtonPinned() ? 48 : 0) + 16;\
+        mExtensionActionListCoordinator.fitActionsWithinWidth(Math.max(0, widthPx - (int) (reservedDp * density)));\
+    }\
+' chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsToolbarCoordinatorImpl.java || return 1
+
 export PATCHED=1
