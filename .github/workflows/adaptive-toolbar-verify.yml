@@ -1,0 +1,49 @@
+name: Adaptive Toolbar Verify
+
+on:
+  push:
+    branches:
+      - feature/adaptive-toolbar-v1
+  pull_request:
+    paths:
+      - patch.sh
+      - fork-patches/**
+      - tests/**
+      - .github/workflows/adaptive-toolbar-verify.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax and focused unit tests
+        run: |
+          bash -n patch.sh build.sh
+          python3 -m py_compile fork-patches/adaptive_toolbar.py
+          python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Verify real pinned Chromium source compatibility
+        env:
+          CHROMIUM_TAG: 157.0.8103.78
+        run: |
+          set -euo pipefail
+          src="$(mktemp -d)"
+          trap 'rm -rf "$src"' EXIT
+          for path in \
+            chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/top/ToolbarTablet.java \
+            chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/top/ToolbarPhone.java \
+            chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/top/ToolbarUtils.java \
+            chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsToolbarCoordinatorImpl.java
+          do
+            mkdir -p "$src/$(dirname "$path")"
+            curl --fail --location --retry 3 --silent --show-error \
+              "https://raw.githubusercontent.com/chromium/chromium/$CHROMIUM_TAG/$path" \
+              --output "$src/$path"
+          done
+          python3 fork-patches/adaptive_toolbar.py "$src"
+          grep -q 'MINIMUM_LOCATION_BAR_WIDTH_DP = 240' "$src/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/top/ToolbarTablet.java"
+          grep -q 'Compact windows must retain' "$src/chrome/browser/ui/android/toolbar/java/src/org/chromium/chrome/browser/toolbar/extensions/ExtensionsToolbarCoordinatorImpl.java"
