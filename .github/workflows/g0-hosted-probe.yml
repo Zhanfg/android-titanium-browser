@@ -1,0 +1,189 @@
+name: G0 Standard Hosted Runner Probe
+
+on:
+  push:
+    branches:
+      - ci/g0-hosted-probe
+    paths:
+      - .github/workflows/g0-hosted-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hosted-source-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout probe branch and pinned Vanadium metadata
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Measure environment before checkout
+        id: env
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cpu="$(nproc)"
+          ram_bytes="$(awk '/MemTotal:/ {print $2 * 1024}' /proc/meminfo)"
+          ram_gib="$(awk -v v="$ram_bytes" 'BEGIN {printf "%.3f",v/1073741824}')"
+          free_bytes="$(df -B1 "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
+          free_gib="$(awk -v v="$free_bytes" 'BEGIN {printf "%.3f",v/1073741824}')"
+          {
+            echo "cpu=$cpu"
+            echo "ram_bytes=$ram_bytes"
+            echo "ram_gib=$ram_gib"
+            echo "disk_before_bytes=$free_bytes"
+            echo "disk_before_gib=$free_gib"
+          } >> "$GITHUB_OUTPUT"
+          echo '=== STANDARD RUNNER ENVIRONMENT ==='
+          echo "nproc = $cpu"
+          echo "RAM bytes = $ram_bytes"
+          echo "RAM GiB = $ram_gib"
+          echo "Workspace available bytes = $free_bytes"
+          echo "Workspace available GiB = $free_gib"
+          nproc
+          free -h
+          df -h "$GITHUB_WORKSPACE" /
+          df -B1 "$GITHUB_WORKSPACE" /
+          uname -a
+          printf 'IMAGE_OS=%s\n' "$(printenv IMAGE_OS || echo unavailable)"
+          printf 'ImageVersion=%s\n' "$(printenv ImageVersion || echo unavailable)"
+      - name: Bounded Chromium source fetch and gclient sync (no build)
+        id: source
+        shell: bash
+        timeout-minutes: 45
+        continue-on-error: true
+        run: |
+          set -Eeuo pipefail
+          ROOT="$RUNNER_TEMP/g0-chromium-probe"
+          LOG="$RUNNER_TEMP/g0-source-probe.log"
+          STAGE_FILE="$RUNNER_TEMP/g0-source-stage"
+          SCRIPT="$RUNNER_TEMP/g0-source-script.sh"
+          printf '%s\n' '=== BEFORE SOURCE ATTEMPT ==='
+          df -h "$GITHUB_WORKSPACE" /
+          df -B1 "$GITHUB_WORKSPACE" /
+          printf '%s\n' '=== SOURCE ATTEMPT START ==='
+          cat > "$SCRIPT" <<'PROBE_SCRIPT'
+          set -Eeuo pipefail
+          ROOT="$RUNNER_TEMP/g0-chromium-probe"
+          STAGE_FILE="$RUNNER_TEMP/g0-source-stage"
+          mkdir -p "$ROOT/chromium/src/out/Default"
+          VERSION="$(grep -m1 -oE '[0-9]+(\.[0-9]+){3}' "$GITHUB_WORKSPACE/vanadium/args.gn")"
+          echo "Chromium VERSION from pinned vanadium/args.gn: $VERSION"
+          echo depot_tools > "$STAGE_FILE"
+          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$ROOT/depot_tools" || exit 11
+          export PATH="$ROOT/depot_tools:$PATH"
+          cd "$ROOT/chromium/src"
+          echo chromium_git_init > "$STAGE_FILE"
+          git init -q
+          git remote add origin https://chromium.googlesource.com/chromium/src.git
+          echo chromium_tag_fetch > "$STAGE_FILE"
+          git fetch --depth 1 https://chromium.googlesource.com/chromium/src.git "+refs/tags/$VERSION:chromium_$VERSION" || exit 12
+          echo chromium_checkout > "$STAGE_FILE"
+          if ! git checkout -q "$VERSION"; then
+            echo "build.sh checkout by VERSION failed; try locally fetched chromium_VERSION ref (probe fallback)"
+            git checkout -q "chromium_$VERSION" || exit 13
+          fi
+          cp "$GITHUB_WORKSPACE/.gclient" "$ROOT/chromium/.gclient"
+          echo gclient_sync > "$STAGE_FILE"
+          gclient sync -D --no-history --nohooks || exit 14
+          echo sync_complete > "$STAGE_FILE"
+          echo "gclient sync completed; build, hooks, compilation and signing deliberately not started."
+          PROBE_SCRIPT
+          chmod 700 "$SCRIPT"
+          start_epoch="$(date +%s)"
+          deadline_epoch="$((start_epoch + 39 * 60))"
+          reason="source_exit"
+          : >"$LOG"
+          setsid bash "$SCRIPT" > "$LOG" 2>&1 &
+          probe_pid=$!
+          while kill -0 "$probe_pid" 2>/dev/null; do
+            avail_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
+            if [ "$avail_kib" -le 2097152 ]; then
+              reason="disk_guard_below_2GiB"
+              echo "DISK GUARD: only $avail_kib KiB free; terminate source attempt." >>"$LOG"
+              kill -TERM -- "-$probe_pid" 2>/dev/null || true
+              sleep 3
+              kill -KILL -- "-$probe_pid" 2>/dev/null || true
+              break
+            fi
+            if [ "$(date +%s)" -ge "$deadline_epoch" ]; then
+              reason="time_guard_39min"
+              echo "TIME GUARD: 39 minute boundary reached." >>"$LOG"
+              kill -TERM -- "-$probe_pid" 2>/dev/null || true
+              sleep 3
+              kill -KILL -- "-$probe_pid" 2>/dev/null || true
+              break
+            fi
+            printf 'PROBE CHECKPOINT: free_kib=%s stage=%s\n' "$avail_kib" "$(cat "$STAGE_FILE" 2>/dev/null || echo not_started)"
+            sleep 10
+          done
+          set +e
+          wait "$probe_pid"
+          rc=$?
+          set -e
+          stage="$(cat "$STAGE_FILE" 2>/dev/null || echo not_started)"
+          after_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
+          {
+            printf 'result=%s\n' "$reason"
+            printf 'exit_code=%s\n' "$rc"
+            printf 'last_stage=%s\n' "$stage"
+            printf 'disk_after_kib=%s\n' "$after_kib"
+          } >> "$GITHUB_OUTPUT"
+          printf '%s\n' '=== SOURCE LOG LAST 90 LINES ==='
+          tail -n 90 "$LOG" || true
+          printf '%s\n' '=== AFTER SOURCE ATTEMPT ==='
+          df -h "$GITHUB_WORKSPACE" /
+          df -B1 "$GITHUB_WORKSPACE" /
+          du -sh "$ROOT" 2>/dev/null || true
+          printf 'Result reason: %s; exit: %s; last stage: %s\n' "$reason" "$rc" "$stage"
+          if [ "$rc" -ne 0 ]; then exit "$rc"; fi
+      - name: Write always-on measured evidence summary
+        if: always()
+        shell: bash
+        env:
+          PROBE_CPU: ${{ steps.env.outputs.cpu }}
+          PROBE_RAM_GIB: ${{ steps.env.outputs.ram_gib }}
+          PROBE_DISK_GIB: ${{ steps.env.outputs.disk_before_gib }}
+          PROBE_DISK_BYTES: ${{ steps.env.outputs.disk_before_bytes }}
+          PROBE_AFTER_KIB: ${{ steps.source.outputs.disk_after_kib }}
+          PROBE_RESULT: ${{ steps.source.outputs.result }}
+          PROBE_EXIT_CODE: ${{ steps.source.outputs.exit_code }}
+          PROBE_STAGE: ${{ steps.source.outputs.last_stage }}
+        run: |
+          set -Eeuo pipefail
+          cpu="$PROBE_CPU"
+          ram="$PROBE_RAM_GIB"
+          before="$PROBE_DISK_GIB"
+          before_bytes="$PROBE_DISK_BYTES"
+          after_kib="$PROBE_AFTER_KIB"
+          result="$PROBE_RESULT"
+          exit_code="$PROBE_EXIT_CODE"
+          stage="$PROBE_STAGE"
+          if [ -z "$result" ]; then result="not_started_or_step_failed"; fi
+          if [ -z "$stage" ]; then stage="none"; fi
+          after_gib="$(awk -v v="$after_kib" 'BEGIN {printf "%.3f",v/1048576}')"
+          gap_gb="$(awk -v v="$before_bytes" 'BEGIN {d=100000000000-v;if(d<0)d=0;printf "%.3f",d/1000000000}')"
+          {
+           echo '# G0 standard hosted runner evidence (probe only)'
+           echo ''
+           echo '| Field | Runtime observation |'
+           echo '|---|---|'
+           echo "| CPU (\`nproc\`) | $cpu logical CPU(s) |"
+           echo "| RAM (\`/proc/meminfo\`) | $ram GiB |"
+           echo "| Workspace free space BEFORE | $before GiB |"
+           echo "| Workspace free space AFTER | $after_gib GiB |"
+           echo "| Shortfall vs Chromium official 100 GB (decimal) minimum | $gap_gb GB at start |"
+           echo "| Source attempt reason | $result |"
+           echo "| Source attempt exit | $exit_code |"
+           echo "| Last source stage | $stage |"
+           echo ''
+           echo 'Source stages follow build.sh: depot_tools clone, Chromium tag fetch, checkout, repository .gclient copy, gclient sync -D --no-history --nohooks.'
+           echo 'The source attempt is bounded by 39 min and a 2 GiB free-space guard, with per-10-second checkpoints.'
+           echo 'Neither gclient runhooks, gn gen, autoninja, signing, release nor the inherited Build workflow was run.'
+           echo 'See environment, fetch, and source log tail in the job step logs; a failed or stopped fetch is expected evidence, not an APK build result.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "G0 evidence: cpu=$cpu ram_gib=$ram disk_before_gib=$before disk_after_gib=$after_gib shortfall_gb=$gap_gb result=$result exit=$exit_code stage=$stage"
