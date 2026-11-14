@@ -2,6 +2,29 @@
 
 > 2026-11-14 计划稿。只供方案比较，不作 Runner 选型，不实施或修改构建代码。以下推荐量级与工时均为粗估，不代表任何一次实测。
 
+## Decision record：2026-11-14 CircleCI large 探针最终证据与待决策项
+
+**G0 尚未通过，不能将取源 success 写成可构建 Chromium。** 当前仅证明两个标准/免费托管来源具备拉取 Chromium `157.0.8103.78` 源码的能力，均未尝试 `gclient runhooks`、`gn gen`、`autoninja`、APK/AAB、签名与发布。
+
+| 证据 | GitHub 标准托管 Runner | CircleCI Machine large |
+|---|---|---|
+| 来源 | [GitHub Run #43584460871](https://github.com/Zhanfg/android-titanium-browser/actions/runs/43584460871) | [CircleCI Pipeline #6](https://circleci.com/api/v2/pipeline/97d5265c-0137-422d-9057-41569d85ee5d)、[Job #2](https://circleci.com/gh/Zhanfg/android-titanium-browser/2)、[`probe-report.txt` 原始 Artifact](https://output.circle-artifacts.com/output/job/2e5be9e0-5b9a-489c-b3e1-a4b9fe734211/artifacts/0/g0/probe-report.txt) |
+| Job 结论 | success，仅完成取源 | **success**，2026-11-14 11:54:07 UTC 结束，job 耗时 **758915 ms** |
+| CPU / RAM | 4 核 / 15.607 GiB | **4 核** / `MemTotal 16083220 kB`（约 **15.34 GiB**） |
+| 磁盘 | GitHub 工作区取源前可用 **87.069 GiB**；取源后 **47.440 GiB** | `lsblk` NVMe **150G**，根文件系统约 **145G**；取源前可用 `144291934208` 字节（`df -h` **135G**），取源后可用 `101591863296` 字节（`df -h` **95G**） |
+| 源码磁盘增长 | 源码工作目录 `40G` | 取源消耗 **42700070912 bytes**（约 **42.7 GB** 十进制），源码目录 `40G` |
+| 标签 / 同步 | `157.0.8103.78`，`sync_complete`、exit `0` | 同标签，`gclient sync -D --no-history --nohooks`、exit `0`，`stage=sync_complete`，取源 **750 秒** |
+| 观察项 | `.gclient_entries missing` 非致命告警 | 同一 `.gclient_entries missing` 告警重现，另见 Git 版本建议；均不影响 `exit=0` |
+| 对完整构建的结论 | **已排除作为本轮标准 Runner 构建候选**：取源前只有 87.069 GiB，未满足 Chromium 官方最低 100 GB 空闲前提 | **仅取源证据成立，不能宣布具备完整构建能力**：取源后约 95 GiB 的可用空间尚未验证是否足以容纳 hooks、生成文件、双架构 `out/` 输出和缓存 |
+
+**单位核查注意：** CircleCI 的取源后 `101591863296` bytes = **101.592 GB**（十进制）≈ **94.62 GiB**（二进制），`df -h` 因取整显示为 95G。Chromium 官方写 `100GB` 却未明确此处是否采用 GiB；如按 **100 GiB** 的工作规划门槛，它确实低于门槛；按严格十进制 **100 GB** 则略高。因此不能单靠 `95 GiB < 100 GB` 的字符串比较作绝对结论。**无论哪种单位，当前剩余空间尚不足以证明双架构构建可行**；追加 `out/` 构建占用可能达到数十 GB，属于工程风险估算，尚非本仓实测失败。
+
+**报告修正：** CircleCI Job API 记录执行档位为 `large`，4 核、约 15.34 GiB；原 `probe-report.txt` 首部的 `xlarge` 来自脚本静态文案错误，不是实际资源档。已在 <https://github.com/Zhanfg/android-titanium-browser/pull/5> 正文注明，并通过文案修正提交 `69c549a0558ebf1e545235a775a011759c325111` 改为 `large`，提交包含 `[ci skip]`，未授权重新执行探针。历史 Artifact 不做篡改。
+
+**结构性时间限制：** CircleCI Free 计划单个 Job 最长 **60 分钟**；全量 Chromium 双架构构建预计数小时，属于**计划耗时估算与产品时长约束的结构性冲突**，并非一次实际编译超时。不得自行将探针延展为构建。
+
+**下一步由用户决定，当前不选方案：** 是否考虑付费档位、其他执行机器、或拆分 Job/缓存等构建架构，需要另行授权和更详细测算。此前关闭的家用主机及租机方案不会自动恢复。**CircleCI 探针线已结束，停止进一步重跑、降档、换 executor、修改仓库/付款设置。G0 未过，G1 PR #2 保持「已写未验（待基线构建）」，G2/G3 停止在原阶段。**
+
 ## Decision record：2026-11-14 用户决定
 
 **2026-11-14 早期决策记录：先选择 GitHub 托管 Runner 进行取证（标准档现已在后续探针中排除）。** 家用高配主机自托管和临时租高配云机两条路线关闭，不再准备。下文第三节原有三种落点对比保留为历史估算，不再代表待选方案。
@@ -84,7 +107,7 @@ GitHub 托管分两档，授权与资源边界不得混淆：
 - 真实 baseline 的各阶段 `time`、峰值内存、磁盘、网络流量和 APK/AAB 大小，并独立记录双 ABI。
 - 安全隔离方案：PR 构建不使用正式签名密钥、不自动发布 Release、不擅自更新 Vanadium 子模块。
 
-**计划状态：仅文档。GitHub 标准托管探针完成且已排除该构建候选，下一项仅为 CircleCI 的有界源码探针；Larger runners/付费不授权，未执行任何 Chromium 构建。G1 尚未验收，G2/G3 不受本计划更改。**
+**当前状态（2026-11-14 20:05 CST 后更新）：G0 仅完成 GitHub 与 CircleCI 两项取源探针，均未进行基线构建；GitHub 标准档已排除，CircleCI large 已成功取源但完整构建资源与单 Job 60 分钟限制仍待用户决策。G0 未过，G1 已写未验（待基线构建），G2/G3 不动。**
 
 ## 5. 来源
 
