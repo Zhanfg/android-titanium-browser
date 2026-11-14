@@ -1,0 +1,109 @@
+name: Baseline Build (self-hosted, no release)
+
+# Proposed G0 verification workflow. Manual dispatch only; no pushes, schedules,
+# upstream sync, release publishing or runner management.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: titanium-g0-baseline-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 1080
+    steps:
+      - name: Checkout fixed baseline (pinned Vanadium submodule)
+        uses: actions/checkout@v5
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - name: Verify self-hosted environment without exposing credentials
+        shell: bash
+        env:
+          LOCAL_TEST_JKS: ${{ secrets.LOCAL_TEST_JKS }}
+          STORE_TEST_JKS: ${{ secrets.STORE_TEST_JKS }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(uname -m)" = x86_64
+          test -s vanadium/args.gn
+          command -v sudo >/dev/null
+          sudo -n true
+          command -v git >/dev/null
+          command -v python3 >/dev/null
+          command -v base64 >/dev/null
+          if [[ -z "${LOCAL_TEST_JKS:-}" || -z "${STORE_TEST_JKS:-}" ]]; then
+            echo "::error::The existing build.sh requires both signing secrets; refusing an expensive partial build."
+            exit 1
+          fi
+          available=$(df -B1 "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')
+          echo "Runner: $(uname -s) $(uname -m)"
+          echo "Pinned project SHA: $GITHUB_SHA"
+          echo "Pinned Vanadium checkout:"
+          git submodule status -- vanadium
+          echo "Free disk before source acquisition (bytes): $available"
+          df -h "$GITHUB_WORKSPACE" /
+          free -h
+          if (( available < 100000000000 )); then
+            echo "::error::Free disk below Chromium's documented 100 GB minimum."
+            exit 1
+          fi
+          echo "All preflight checks passed. No upstream update or git push will be run."
+
+      - name: Build unchanged pinned baseline
+        shell: bash
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          LOCAL_TEST_JKS: ${{ secrets.LOCAL_TEST_JKS }}
+          STORE_TEST_JKS: ${{ secrets.STORE_TEST_JKS }}
+        run: |
+          set -euo pipefail
+          # The repository's build.sh itself is unchanged. -e prevents its final
+          # cleanup command from masking an earlier failed compile/sign step.
+          bash -e ./build.sh
+
+      - name: Verify signed output files and write checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 -oE '[0-9]+(\.[0-9]+){3}' vanadium/args.gn)
+          test -n "$version"
+          files=(
+            "chromium/src/out/release/${version}-armeabi-v7a.apk"
+            "chromium/src/out/release/${version}-arm64-v8a.apk"
+            "chromium/src/out/release/${version}-arm64-v8a.aab"
+          )
+          for file in "${files[@]}"; do
+            if [[ ! -s "$file" ]]; then
+              echo "::error::Missing or empty baseline output: $file"
+              exit 1
+            fi
+          done
+          sha256sum "${files[@]}" > baseline-sha256.txt
+          echo "Checked 3 non-empty signed outputs; hashes saved to baseline-sha256.txt."
+
+      - name: Upload baseline APK and AAB evidence (not a GitHub Release)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: titanium-g0-baseline-${{ github.run_id }}
+          path: |
+            chromium/src/out/release/*.apk
+            chromium/src/out/release/*.aab
+            baseline-sha256.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Final disk evidence
+        if: always()
+        shell: bash
+        run: |
+          df -h "$GITHUB_WORKSPACE" /
+          echo "G0 verification workflow: no Release, Attestation, Vanadium update or git push."
