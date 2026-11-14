@@ -183,3 +183,6 @@ sed -i 's/|| mSupportedProfileType == SupportedProfileType.REGULAR) {/|| mSuppor
 sed -i 's/|| mSupportedProfileType == SupportedProfileType.OFF_THE_RECORD) {/|| mSupportedProfileType == SupportedProfileType.OFF_THE_RECORD || mSupportedProfileType == SupportedProfileType.MIXED) {/' chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java
 
 export PATCHED=1
+
+# Fork-only adaptive toolbar. Applied after all upstream Titanium modifications.
+python3 "$SCRIPT_DIR/fork-patches/adaptive_toolbar.py" "$PWD"
