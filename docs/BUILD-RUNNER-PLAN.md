@@ -1,6 +1,6 @@
-# G0：Chromium 基线构建 Runner 资源测算（Plan only）
+# G0：Chromium 基线构建 Runner 资源测算与执行落点记录（Vultr 已定版）
 
-> 2026-11-14 计划稿。只供方案比较，不作 Runner 选型，不实施或修改构建代码。以下推荐量级与工时均为粗估，不代表任何一次实测。
+> 2026-11-14 决策记录。最新有效执行落点为 **Vultr 按小时租用 + GitHub self-hosted Runner**；早期方案比较保留为历史资料。本文仅记录决策及测算，不执行部署、构建或仓库代码修改；所有非实测估算均单独标明。
 
 ## Decision record：2026-11-14 22:57 CST Vultr self-hosted Runner 定版（最新有效）
 
