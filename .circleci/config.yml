@@ -1,0 +1,156 @@
+version: 2.1
+
+# G0 evidence probe ONLY. Never run the original Build workflow or compile/sign APKs.
+jobs:
+  g0-probe:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: xlarge
+    working_directory: ~/project
+    steps:
+      - checkout
+
+      - run:
+          name: Measure CircleCI VM before source acquisition
+          no_output_timeout: 3m
+          command: |
+            set -euo pipefail
+            report="$PWD/probe-report.txt"
+            {
+              echo "# G0 CircleCI source-capacity probe (not a Chromium build)"
+              echo "CIRCLE_BRANCH=$CIRCLE_BRANCH"
+              echo "CIRCLE_SHA1=$CIRCLE_SHA1"
+              echo "VM image configured: ubuntu-2404:current; machine resource_class: xlarge"
+              echo "=== PROBE START (UTC) ==="
+              date -u '+%Y-%m-%dT%H:%M:%SZ'
+              echo "=== CPU (nproc) ==="
+              nproc
+              echo "=== RAM (free -h) ==="
+              free -h
+              echo "=== RAM (MemTotal kB) ==="
+              awk '/MemTotal:/ {print}' /proc/meminfo
+              echo "=== FREE DISK BEFORE (workspace and /) ==="
+              df -h "$PWD" /
+              df -B1 "$PWD" /
+              echo "=== BLOCK DEVICES ==="
+              lsblk || true
+              echo "=== OS ==="
+              uname -a
+              echo "=== EPOCH START ==="
+              date +%s
+            } | tee "$report"
+
+      - run:
+          name: Bounded Chromium tag fetch and gclient sync (probe only)
+          no_output_timeout: 45m
+          command: |
+            set -euo pipefail
+            repo_root="$PWD"
+            report="$repo_root/probe-report.txt"
+            probe_root="$HOME/g0-chromium-src"
+            stage_file="$HOME/g0-circleci-probe-stage"
+            source_log="$HOME/g0-circleci-source.log"
+            source_script="$HOME/g0-circleci-fetch.sh"
+            mkdir -p "$probe_root/chromium/src/out/Default"
+            before_bytes="$(df -B1 "$probe_root" | awk 'NR==2 {print $4}')"
+            started_epoch="$(date +%s)"
+            {
+              echo "=== SOURCE START (UTC) ==="
+              date -u '+%Y-%m-%dT%H:%M:%SZ'
+              echo "Before source fetch: $before_bytes free bytes on probe_root filesystem"
+              df -h "$repo_root" / "$probe_root"
+              echo "The source attempt is capped at timeout 2400 seconds (40 min)."
+              echo "Disk guard: stop if <4 GiB free; check every 30 seconds."
+            } | tee -a "$report"
+            cat > "$source_script" <<'FETCH'
+            #!/bin/bash
+            set -euo pipefail
+            repo_root="$1"
+            probe_root="$2"
+            stage_file="$3"
+            echo "stage=vanadium_submodule" > "$stage_file"
+            (cd "$repo_root" && git submodule update --init --depth 1 vanadium)
+            version="$(grep -m1 -oE '[0-9]+(\.[0-9]+){3}' "$repo_root/vanadium/args.gn")"
+            test -n "$version"
+            echo "Pinned Chromium tag from vanadium/args.gn: $version"
+            echo "stage=depot_tools_clone" > "$stage_file"
+            git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$probe_root/depot_tools"
+            export PATH="$probe_root/depot_tools:$PATH"
+            mkdir -p "$probe_root/chromium/src/out/Default"
+            cd "$probe_root/chromium/src"
+            echo "stage=chromium_git_init" > "$stage_file"
+            git init -q
+            git remote add origin https://chromium.googlesource.com/chromium/src.git
+            echo "stage=chromium_tag_fetch" > "$stage_file"
+            git fetch --depth 1 https://chromium.googlesource.com/chromium/src.git "+refs/tags/$version:chromium_$version"
+            echo "stage=chromium_tag_checkout" > "$stage_file"
+            git checkout -q "$version" || git checkout -q "chromium_$version"
+            cp "$repo_root/.gclient" "$probe_root/chromium/.gclient"
+            echo "stage=gclient_sync" > "$stage_file"
+            gclient sync -D --no-history --nohooks
+            echo "stage=sync_complete" > "$stage_file"
+            echo "sync complete; deliberately skipped runhooks, GN, autoninja, signing and publishing"
+            FETCH
+            chmod 700 "$source_script"
+            echo "stage=not_started" > "$stage_file"
+            timeout --signal=TERM --kill-after=20s 2400 bash "$source_script" "$repo_root" "$probe_root" "$stage_file" >"$source_log" 2>&1 &
+            source_pid="$!"
+            guard_reason="normal_source_exit"
+            while kill -0 "$source_pid" 2>/dev/null; do
+              available_kib="$(df -Pk "$probe_root" | awk 'NR==2 {print $4}')"
+              elapsed="$(( $(date +%s) - started_epoch ))"
+              stage="$(cat "$stage_file" 2>/dev/null || echo unavailable)"
+              echo "PROBE CHECKPOINT elapsed_sec=$elapsed available_kib=$available_kib stage=$stage" | tee -a "$report"
+              if [ "$available_kib" -lt 4194304 ]; then
+                guard_reason="disk_guard_under_4GiB"
+                echo "Disk guard triggered; terminate source attempt." | tee -a "$report"
+                kill -TERM "$source_pid" 2>/dev/null || true
+                break
+              fi
+              sleep 30
+            done
+            source_exit=0
+            wait "$source_pid" || source_exit=$?
+            ended_epoch="$(date +%s)"
+            after_bytes="$(df -B1 "$probe_root" | awk 'NR==2 {print $4}')"
+            elapsed_total="$((ended_epoch - started_epoch))"
+            disk_delta_bytes="$((before_bytes - after_bytes))"
+            stage="$(cat "$stage_file" 2>/dev/null || echo unavailable)"
+            {
+              echo "=== SOURCE END (UTC) ==="
+              date -u '+%Y-%m-%dT%H:%M:%SZ'
+              echo "SOURCE_EXIT_CODE=$source_exit"
+              echo "SOURCE_LAST_STAGE=$stage"
+              echo "SOURCE_GUARD_REASON=$guard_reason"
+              echo "SOURCE_DURATION_SECONDS=$elapsed_total"
+              echo "WORKSPACE_FREE_BEFORE_BYTES=$before_bytes"
+              echo "WORKSPACE_FREE_AFTER_BYTES=$after_bytes"
+              echo "DISK_CONSUMED_BYTES=$disk_delta_bytes"
+              echo "=== DISK AFTER ==="
+              df -h "$repo_root" / "$probe_root"
+              df -B1 "$repo_root" / "$probe_root"
+              echo "=== SOURCE WORKTREE SIZE ==="
+              du -sh "$probe_root" "$probe_root/chromium/src" 2>/dev/null || true
+              echo "=== FETCH/SYNC LOG: LAST 120 LINES ==="
+              tail -n 120 "$source_log" || true
+              echo "=== END ==="
+              date -u '+%Y-%m-%dT%H:%M:%SZ'
+              echo "No Chromium compile, signing, release or other Build workflow was performed."
+            } >> "$report"
+            echo "Source attempt ended: exit=$source_exit stage=$stage duration_seconds=$elapsed_total free_after_bytes=$after_bytes"
+            tail -n 35 "$source_log" || true
+            echo "Report: $report"
+            # An incomplete source download is expected evidence, not a failing job.
+            true
+
+      - store_artifacts:
+          path: probe-report.txt
+          destination: g0/probe-report.txt
+
+workflows:
+  g0-probe-workflow:
+    jobs:
+      - g0-probe:
+          filters:
+            branches:
+              only: ci/g0-circleci-probe
