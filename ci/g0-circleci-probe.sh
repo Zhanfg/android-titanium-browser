@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# G0 standard CircleCI xlarge evidence probe. Never builds, signs or publishes Chromium.
+# G0 CircleCI large evidence probe. Never builds, signs or publishes Chromium.
 set -euo pipefail
 if [[ "${1:-}" == "measure" ]]; then
 set -euo pipefail
@@ -8,7 +8,7 @@ report="$PWD/probe-report.txt"
   echo "# G0 CircleCI source-capacity probe (not a Chromium build)"
   echo "CIRCLE_BRANCH=$CIRCLE_BRANCH"
   echo "CIRCLE_SHA1=$CIRCLE_SHA1"
-  echo "VM image configured: ubuntu-2404:current; machine resource_class: xlarge"
+  echo "VM image configured: ubuntu-2404:current; machine resource_class: large"
   echo "=== PROBE START (UTC) ==="
   date -u '+%Y-%m-%dT%H:%M:%SZ'
   echo "=== CPU (nproc) ==="
