@@ -2,6 +2,21 @@
 
 > 2026-11-14 计划稿。只供方案比较，不作 Runner 选型，不实施或修改构建代码。以下推荐量级与工时均为粗估，不代表任何一次实测。
 
+## Decision record：2026-11-14 用户决定
+
+**已选定执行路线：GitHub 托管 Runner。** 家用高配主机自托管和临时租高配云机两条路线关闭，不再准备。下文第三节原有三种落点对比保留为历史估算，不再代表待选方案。
+
+GitHub 托管分两档，授权与资源边界不得混淆：
+
+| 档位 | GitHub 官方规格与资格 | 当前授权 |
+|---|---|---|
+| **标准托管 Runner（`ubuntu-latest`，公开仓库）** | **4 vCPU、16 GB RAM、14 GB SSD**；标准公开仓库可免费使用。Chromium Android 官方构建要求 **至少 100 GB 空闲磁盘**，因此官方规格相差 **86 GB**。这是规格对比而非运行时实测。 | **仅授权本轮一次有界的源码/磁盘探针**。只记录实际 `nproc`、`free -h`、`df -h` 和取源失败点；不触发构建或签名发布。 |
+| **Larger runners** | 更大规格需要 GitHub Team / Enterprise Cloud **组织或企业** 才能配置，需付费且不能默认按公开仓免费计算。个人账号仓库当前不可直接启用此档。 | **未授权**：不建组织、不改计划或付款、不配置/启用 Larger runner。 |
+
+调查来源：[GitHub 标准 Runner 规格](https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job)、[GitHub Larger runner 资格](https://docs.github.com/en/actions/concepts/runners/larger-runners)、[Chromium Android 官方最低要求](https://chromium.googlesource.com/chromium/src/+/main/docs/android_build_instructions.md)。
+
+**执行门槛：** 只在独立 `ci/g0-hosted-probe` 分支开展一次只读资源测量与有界取源探针；探针结束后必须先由监督者审查运行日志，再决定是否允许任何基线编译尝试。G1 仍为「已写未验（待基线构建）」。不得将探针结果表述为构建或运行验证。
+
 ## 1. 依据与现有构建流程
 
 仓库：`Zhanfg/android-titanium-browser`，`main` 分支当前的 `build.sh`、`common.sh`、`args.gn` 和 `.github/workflows/build.yml`。
@@ -29,7 +44,7 @@
 
 **口径声明：** 8 GB、100 GB 与 >16 GB 来自官方构建文档；32–64 GB、250–400 GB、16–32 线程、3–12+ 小时及其他区间是工程估算，未经本仓实测。这里的磁盘指构建期间的**空闲空间**，不是磁盘总容量。估时包含显著不确定性，不能作为交付承诺。
 
-## 3. 三种部署落点对比（不选方案）
+## 3. 三种部署落点对比（历史资料，现已选定托管）
 
 | 落点 | 能力与特点 | 风险、成本项与待核对条件 |
 |---|---|---|
@@ -46,7 +61,7 @@
 - 真实 baseline 的各阶段 `time`、峰值内存、磁盘、网络流量和 APK/AAB 大小，并独立记录双 ABI。
 - 安全隔离方案：PR 构建不使用正式签名密钥、不自动发布 Release、不擅自更新 Vanadium 子模块。
 
-**计划状态：仅文档。未定落点，未建 Runner，未执行任何构建。G1 尚未验收，G2/G3 不受本计划更改。**
+**计划状态：仅文档。托管路线已选定，但仅授权标准托管探针；未建设/启用 Larger Runner，未执行任何 Chromium 构建。G1 尚未验收，G2/G3 不受本计划更改。**
 
 ## 5. 来源
 
