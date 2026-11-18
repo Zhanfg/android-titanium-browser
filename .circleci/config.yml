@@ -1,0 +1,30 @@
+version: 2.1
+
+# G0 evidence probe only, not an APK build or release.
+jobs:
+  g0-probe:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: large
+    working_directory: ~/project
+    steps:
+      - checkout
+      - run:
+          name: Measure CircleCI VM before source acquisition
+          no_output_timeout: 3m
+          command: bash ci/g0-circleci-probe.sh measure
+      - run:
+          name: Bounded Chromium tag fetch and gclient sync (probe only)
+          no_output_timeout: 45m
+          command: bash ci/g0-circleci-probe.sh fetch
+      - store_artifacts:
+          path: probe-report.txt
+          destination: g0/probe-report.txt
+
+workflows:
+  g0-probe-workflow:
+    jobs:
+      - g0-probe:
+          filters:
+            branches:
+              only: ci/g0-circleci-probe
